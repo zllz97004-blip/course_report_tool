@@ -4,8 +4,9 @@ from pathlib import Path
 from .analyzer import build_analysis_base
 from .calculator import build_course_target_result, build_student_target_result
 from .config import debug_print
-from .exporter import export_analysis_workbook, export_report_docx, export_result_workbook
+from .exporter import export_analysis_workbook, export_result_workbook
 from .loaders import load_all_inputs
+from .report_exporter import export_report_docx
 from .validators import validate_inputs
 
 
@@ -70,9 +71,8 @@ def main():
     export_report_docx(
         output_path=output_dir / "07_达成度报告草稿.docx",
         course_df=data["course"],
-        analysis_df=analysis_df,
+        course_target_df=course_target_df,
         student_target_df=student_target_df,
-        course_path=course_path,
     )
 
     print(f"处理完成，输出目录：{output_dir}")
