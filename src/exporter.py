@@ -28,10 +28,141 @@ def export_result_workbook(output_path: Path, student_target_df: pd.DataFrame, c
         course_target_df.to_excel(writer, sheet_name="课程目标结果表", index=False)
 
 
-def export_analysis_workbook(output_path: Path, analysis_df: pd.DataFrame) -> None:
+ANALYSIS_PASS_THRESHOLD = 0.60
+
+
+def _build_course_summary_sheet(course_target_df: pd.DataFrame) -> pd.DataFrame:
+    df = course_target_df.copy()
+    result = df[
+        [
+            "课程目标编号",
+            "课程目标描述",
+            "综合平均达成值",
+        ]
+    ].copy()
+    result["合格阈值"] = ANALYSIS_PASS_THRESHOLD
+    result["是否达成"] = result["综合平均达成值"].apply(
+        lambda v: "达成" if pd.notna(v) and v >= ANALYSIS_PASS_THRESHOLD else "未达成"
+    )
+    return result
+
+
+def _build_student_attainment_sheet(student_target_df: pd.DataFrame) -> pd.DataFrame:
+    df = student_target_df.copy()
+    result = df[
+        [
+            "学号",
+            "姓名",
+            "课程目标编号",
+            "过程性贡献值",
+            "期末贡献值",
+            "综合达成值",
+        ]
+    ].copy()
+    result = result.rename(
+        columns={
+            "过程性贡献值": "过程性成绩",
+            "期末贡献值": "期末成绩",
+            "综合达成值": "综合达成度",
+        }
+    )
+    result["是否达成"] = result["综合达成度"].apply(
+        lambda v: "达成" if pd.notna(v) and v >= ANALYSIS_PASS_THRESHOLD else "未达成"
+    )
+    return result
+
+
+def _build_unmet_students_sheet(student_target_df: pd.DataFrame) -> pd.DataFrame:
+    student_attainment = _build_student_attainment_sheet(student_target_df)
+    result = student_attainment[student_attainment["综合达成度"] < ANALYSIS_PASS_THRESHOLD].copy()
+    result = result[
+        [
+            "课程目标编号",
+            "学号",
+            "姓名",
+            "综合达成度",
+        ]
+    ]
+    return result.sort_values(["课程目标编号", "学号"]).reset_index(drop=True)
+
+
+def _attainment_interval(v) -> str:
+    if pd.isna(v):
+        return ""
+    if v < 0.60:
+        return "<0.60"
+    if v < 0.70:
+        return "0.60-0.70"
+    if v < 0.80:
+        return "0.70-0.80"
+    if v < 0.90:
+        return "0.80-0.90"
+    return ">=0.90"
+
+
+def _build_distribution_sheet(student_target_df: pd.DataFrame) -> pd.DataFrame:
+    df = student_target_df[["课程目标编号", "综合达成值"]].copy()
+    df["达成度区间"] = df["综合达成值"].apply(_attainment_interval)
+    intervals = ["<0.60", "0.60-0.70", "0.70-0.80", "0.80-0.90", ">=0.90"]
+    rows = []
+
+    for target_id, grp in df.groupby("课程目标编号", sort=True):
+        total = len(grp)
+        counts = grp["达成度区间"].value_counts().to_dict()
+        for interval in intervals:
+            count = int(counts.get(interval, 0))
+            rows.append(
+                {
+                    "课程目标编号": target_id,
+                    "达成度区间": interval,
+                    "人数": count,
+                    "占比": count / total if total else 0,
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
+def _build_chart_data_sheet(course_target_df: pd.DataFrame, distribution_df: pd.DataFrame) -> pd.DataFrame:
+    avg_df = course_target_df[["课程目标编号", "综合平均达成值"]].copy()
+    unmet_df = distribution_df[distribution_df["达成度区间"] == "<0.60"][
+        ["课程目标编号", "人数"]
+    ].rename(columns={"人数": "未达成人数"})
+    interval_counts = distribution_df.pivot_table(
+        index="课程目标编号",
+        columns="达成度区间",
+        values="人数",
+        aggfunc="sum",
+        fill_value=0,
+    ).reset_index()
+
+    result = avg_df.merge(unmet_df, on="课程目标编号", how="left")
+    result = result.merge(interval_counts, on="课程目标编号", how="left")
+    result["未达成人数"] = result["未达成人数"].fillna(0).astype(int)
+    return result
+
+
+def export_analysis_workbook(
+    output_path: Path,
+    analysis_df: pd.DataFrame,
+    student_target_df: pd.DataFrame = None,
+    course_target_df: pd.DataFrame = None,
+) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         analysis_df.to_excel(writer, sheet_name="分析底表", index=False)
+        if student_target_df is not None and course_target_df is not None:
+            course_summary_df = _build_course_summary_sheet(course_target_df)
+            student_attainment_df = _build_student_attainment_sheet(student_target_df)
+            unmet_students_df = _build_unmet_students_sheet(student_target_df)
+            distribution_df = _build_distribution_sheet(student_target_df)
+            chart_data_df = _build_chart_data_sheet(course_target_df, distribution_df)
+
+            course_summary_df.to_excel(writer, sheet_name="课程目标汇总表", index=False)
+            student_attainment_df.to_excel(writer, sheet_name="学生个体达成度表", index=False)
+            unmet_students_df.to_excel(writer, sheet_name="未达成学生清单", index=False)
+            distribution_df.to_excel(writer, sheet_name="达成度分布统计表", index=False)
+            chart_data_df.to_excel(writer, sheet_name="图表数据表", index=False)
 
 
 def _normalize_text(v) -> str:

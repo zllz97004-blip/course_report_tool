@@ -61,7 +61,12 @@ def main():
     debug_print(analysis_df.head())
 
     export_result_workbook(output_dir / "05_课程目标结果表.xlsx", student_target_df, course_target_df)
-    export_analysis_workbook(output_dir / "06_达成度报告分析底表.xlsx", analysis_df)
+    export_analysis_workbook(
+        output_dir / "06_达成度报告分析底表.xlsx",
+        analysis_df,
+        student_target_df=student_target_df,
+        course_target_df=course_target_df,
+    )
     export_report_docx(
         output_path=output_dir / "07_达成度报告草稿.docx",
         course_df=data["course"],
