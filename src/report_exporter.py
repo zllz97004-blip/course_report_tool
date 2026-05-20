@@ -4,7 +4,7 @@ import pandas as pd
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
-from docx.shared import Pt
+from docx.shared import Cm, Pt
 
 
 REPORT_PASS_THRESHOLD = 0.60
@@ -162,13 +162,34 @@ def _add_result(doc: Document, course_summary_df: pd.DataFrame) -> None:
     _add_table(doc, course_summary_df)
 
 
+def _add_charts(doc: Document, chart_paths: dict = None) -> None:
+    if not chart_paths:
+        return
+
+    chart_items = [
+        ("图1 3年课程目标达成度对比图", chart_paths.get("three_year_compare")),
+        ("图2 课程目标1达成度值散点图", chart_paths.get("target1_scatter")),
+        ("图3 课程目标2达成度值散点图", chart_paths.get("target2_scatter")),
+    ]
+
+    _add_heading(doc, "五、持续改进报告图表")
+    for caption, path in chart_items:
+        if path is None or not Path(path).exists():
+            continue
+        doc.add_picture(str(path), width=Cm(15))
+        last_paragraph = doc.paragraphs[-1]
+        last_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        caption_paragraph = doc.add_paragraph(caption)
+        caption_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+
 def _add_student_analysis(
     doc: Document,
     course_summary_df: pd.DataFrame,
     student_attainment_df: pd.DataFrame,
     unmet_students_df: pd.DataFrame,
 ) -> None:
-    _add_heading(doc, "五、学生个体达成情况分析")
+    _add_heading(doc, "六、学生个体达成情况分析")
     for _, row in course_summary_df.iterrows():
         target_id = row["课程目标编号"]
         total = int((student_attainment_df["课程目标编号"] == target_id).sum())
@@ -192,7 +213,7 @@ def _add_problem_analysis(
     distribution_df: pd.DataFrame,
     unmet_students_df: pd.DataFrame,
 ) -> None:
-    _add_heading(doc, "六、存在问题")
+    _add_heading(doc, "七、存在问题")
     for _, row in course_summary_df.iterrows():
         target_id = row["课程目标编号"]
         target_dist = distribution_df[distribution_df["课程目标编号"] == target_id]
@@ -208,7 +229,7 @@ def _add_problem_analysis(
 
 
 def _add_improvement(doc: Document) -> None:
-    _add_heading(doc, "七、持续改进措施")
+    _add_heading(doc, "八、持续改进措施")
     measures = [
         "加强薄弱知识点讲解，结合课堂练习和阶段性检测及时发现学生理解偏差。",
         "优化过程性考核反馈机制，对作业、实验操作和实验报告中的共性问题进行集中讲评。",
@@ -219,7 +240,7 @@ def _add_improvement(doc: Document) -> None:
 
 
 def _add_conclusion(doc: Document, course_summary_df: pd.DataFrame) -> None:
-    _add_heading(doc, "八、结论")
+    _add_heading(doc, "九、结论")
     reached = course_summary_df[course_summary_df["是否达成"] == "达成"]["课程目标编号"].tolist()
     unreached = course_summary_df[course_summary_df["是否达成"] != "达成"]["课程目标编号"].tolist()
     parts = []
@@ -238,6 +259,7 @@ def export_report_docx(
     course_df: pd.DataFrame,
     course_target_df: pd.DataFrame,
     student_target_df: pd.DataFrame,
+    chart_paths: dict = None,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -256,6 +278,7 @@ def export_report_docx(
     _add_course_targets(doc, course_df)
     _add_method(doc)
     _add_result(doc, course_summary_df)
+    _add_charts(doc, chart_paths)
     _add_student_analysis(doc, course_summary_df, student_attainment_df, unmet_students_df)
     _add_problem_analysis(doc, course_summary_df, distribution_df, unmet_students_df)
     _add_improvement(doc)

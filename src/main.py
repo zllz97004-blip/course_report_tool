@@ -3,6 +3,7 @@ from pathlib import Path
 
 from .analyzer import build_analysis_base
 from .calculator import build_course_target_result, build_student_target_result
+from .chart_exporter import export_charts
 from .config import debug_print
 from .exporter import export_analysis_workbook, export_result_workbook
 from .loaders import load_all_inputs
@@ -62,10 +63,17 @@ def main():
     debug_print(analysis_df.head())
 
     export_result_workbook(output_dir / "05_课程目标结果表.xlsx", student_target_df, course_target_df)
+    analysis_workbook_path = output_dir / "06_达成度报告分析底表.xlsx"
     export_analysis_workbook(
-        output_dir / "06_达成度报告分析底表.xlsx",
+        analysis_workbook_path,
         analysis_df,
         student_target_df=student_target_df,
+        course_target_df=course_target_df,
+    )
+    chart_paths = export_charts(
+        course_path=course_path,
+        output_dir=output_dir,
+        analysis_workbook_path=analysis_workbook_path,
         course_target_df=course_target_df,
     )
     export_report_docx(
@@ -73,6 +81,7 @@ def main():
         course_df=data["course"],
         course_target_df=course_target_df,
         student_target_df=student_target_df,
+        chart_paths=chart_paths,
     )
 
     print(f"处理完成，输出目录：{output_dir}")
