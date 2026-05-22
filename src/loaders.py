@@ -119,7 +119,19 @@ def has_exam_inputs(course_path: Path) -> bool:
         course_path / "04_试卷题目得分长表.xlsx",
         course_path / "04_试卷题目得分表_长表.xlsx",
     ]
-    return mapping_file.exists() and any(p.exists() for p in long_score_files)
+    has_mapping = mapping_file.exists()
+    has_long_scores = any(p.exists() for p in long_score_files)
+    if has_mapping != has_long_scores:
+        missing = []
+        if not has_mapping:
+            missing.append("03_试卷分值对应表.xlsx")
+        if not has_long_scores:
+            missing.append("04_试卷题目得分长表.xlsx")
+        raise FileNotFoundError(
+            "试卷型课程输入文件不完整，03 和 04 必须同时存在；缺少: "
+            + "、".join(missing)
+        )
+    return has_mapping and has_long_scores
 
 
 def load_course_excel(path: Path) -> pd.DataFrame:

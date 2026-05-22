@@ -1,11 +1,12 @@
 
+import argparse
 import os
 from pathlib import Path
 
 from .analyzer import build_analysis_base
 from .calculator import build_course_target_result, build_student_target_result
 from .chart_exporter import export_charts
-from .config import debug_print
+from .config import ATTAINMENT_THRESHOLD, debug_print
 from .exporter import export_analysis_workbook, export_result_workbook
 from .loaders import load_all_inputs
 from .non_exam_calculator import build_non_exam_student_target_result
@@ -34,10 +35,48 @@ def _find_course_folder(input_root: Path, course_dir_name: str = None) -> Path:
     return folders[0]
 
 
-def main():
+def _parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="课程目标达成度报告生成工具")
+    parser.add_argument(
+        "--course",
+        help="input_courses 下的课程文件夹名称；不传则使用当前默认课程选择规则。",
+    )
+    return parser.parse_args(argv)
+
+
+def _print_run_summary(output_dir: Path, data: dict, student_target_df, course_target_df, chart_paths: dict) -> None:
+    course_name = str(data["course"]["课程名称"].iloc[0])
+    course_type_label = "试卷型课程" if data["course_type"] == "exam" else "非试卷型课程"
+    target_count = course_target_df["课程目标编号"].nunique()
+    student_count = student_target_df["学号"].nunique()
+    file05 = output_dir / "05_课程目标结果表.xlsx"
+    file06 = output_dir / "06_达成度报告分析底表.xlsx"
+    file07 = output_dir / "07_达成度报告草稿.docx"
+    figures_dir = output_dir / "figures"
+    figure_paths = [p for p in chart_paths.values() if isinstance(p, Path)]
+    figure_paths.extend([p for _, p in chart_paths.get("scatter", [])])
+    figures_ok = figures_dir.exists() and bool(figure_paths) and all(p.exists() for p in figure_paths)
+
+    print("\n===== 运行摘要 =====")
+    print(f"课程名称：{course_name}")
+    print(f"课程类型：{course_type_label}")
+    print(f"课程目标数量：{target_count}")
+    print(f"学生人数：{student_count}")
+    print(f"合格阈值：{ATTAINMENT_THRESHOLD:.2f}")
+    print(f"05_课程目标结果表.xlsx：{'已生成' if file05.exists() else '未生成'}")
+    print(f"06_达成度报告分析底表.xlsx：{'已生成' if file06.exists() else '未生成'}")
+    print(f"07_达成度报告草稿.docx：{'已生成' if file07.exists() else '未生成'}")
+    print(f"figures：{'已生成' if figures_ok else '未完整生成'}")
+    print("课程目标平均达成值：")
+    for _, row in course_target_df.iterrows():
+        print(f"- {row['课程目标编号']}：{row['综合平均达成值']:.6f}")
+
+
+def main(argv=None):
+    args = _parse_args(argv)
     project_root = Path(__file__).resolve().parent.parent
     input_root = project_root / "input_courses"
-    course_path = _find_course_folder(input_root, COURSE_DIR_NAME)
+    course_path = _find_course_folder(input_root, args.course or COURSE_DIR_NAME)
 
     output_dir = project_root / "output" / course_path.name
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -106,6 +145,7 @@ def main():
         chart_paths=chart_paths,
     )
 
+    _print_run_summary(output_dir, data, student_target_df, course_target_df, chart_paths)
     print(f"处理完成，输出目录：{output_dir}")
 
 
