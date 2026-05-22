@@ -3,10 +3,10 @@ import re
 import numpy as np
 import pandas as pd
 
-from .config import debug_print
+from .config import ATTAINMENT_THRESHOLD, debug_print
 
 
-PASS_THRESHOLD = 0.70
+PASS_THRESHOLD = ATTAINMENT_THRESHOLD
 
 DEFAULT_FULL_MARKS = {
     "课程目标1": {

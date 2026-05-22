@@ -6,8 +6,9 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 
+from .config import ATTAINMENT_THRESHOLD
 
-REPORT_PASS_THRESHOLD = 0.60
+REPORT_PASS_THRESHOLD = ATTAINMENT_THRESHOLD
 
 
 def _fmt(v, digits=6) -> str:
@@ -97,17 +98,17 @@ def _build_distribution(student_attainment_df: pd.DataFrame) -> pd.DataFrame:
     def interval(v):
         if pd.isna(v):
             return ""
-        if v < 0.60:
-            return "<0.60"
+        if v < REPORT_PASS_THRESHOLD:
+            return f"<{REPORT_PASS_THRESHOLD:.2f}"
         if v < 0.70:
-            return "0.60-0.70"
+            return f"{REPORT_PASS_THRESHOLD:.2f}-0.70"
         if v < 0.80:
             return "0.70-0.80"
         if v < 0.90:
             return "0.80-0.90"
         return ">=0.90"
 
-    intervals = ["<0.60", "0.60-0.70", "0.70-0.80", "0.80-0.90", ">=0.90"]
+    intervals = [f"<{REPORT_PASS_THRESHOLD:.2f}", f"{REPORT_PASS_THRESHOLD:.2f}-0.70", "0.70-0.80", "0.80-0.90", ">=0.90"]
     df = student_attainment_df[["课程目标编号", "综合达成度"]].copy()
     df["达成度区间"] = df["综合达成度"].apply(interval)
 
@@ -153,7 +154,7 @@ def _add_method(doc: Document) -> None:
     doc.add_paragraph(
         "本课程采用过程性考核与期末考试相结合的方式评价课程目标达成情况。"
         "过程性考核成绩 = 课堂表现×10% + 课程作业×50% + 实验操作×20% + 实验报告×20%。"
-        "个体达成度合格阈值为 0.60。"
+        f"个体达成度合格阈值为 {REPORT_PASS_THRESHOLD:.2f}。"
     )
 
 
@@ -201,7 +202,7 @@ def _add_student_analysis(
         )
         doc.add_paragraph(
             f"{target_id}平均达成值为{_fmt(row['综合平均达成值'])}，"
-            f"{'达到' if row['是否达成'] == '达成' else '未达到'}0.60的合格阈值。"
+            f"{'达到' if row['是否达成'] == '达成' else '未达到'}{REPORT_PASS_THRESHOLD:.2f}的合格阈值。"
             f"参与评价学生记录数为{total}，未达成学生记录数为{unmet_count}。"
             f"{unmet_text}"
         )
@@ -217,12 +218,14 @@ def _add_problem_analysis(
     for _, row in course_summary_df.iterrows():
         target_id = row["课程目标编号"]
         target_dist = distribution_df[distribution_df["课程目标编号"] == target_id]
-        low_count = int(target_dist.loc[target_dist["达成度区间"] == "<0.60", "人数"].sum())
-        near_count = int(target_dist.loc[target_dist["达成度区间"] == "0.60-0.70", "人数"].sum())
+        low_interval = f"<{REPORT_PASS_THRESHOLD:.2f}"
+        near_interval = f"{REPORT_PASS_THRESHOLD:.2f}-0.70"
+        low_count = int(target_dist.loc[target_dist["达成度区间"] == low_interval, "人数"].sum())
+        near_count = int(target_dist.loc[target_dist["达成度区间"] == near_interval, "人数"].sum())
         unmet_count = int((unmet_students_df["课程目标编号"] == target_id).sum())
         doc.add_paragraph(
             f"{target_id}整体评价结果为{row['是否达成']}，但从学生个体分布看，"
-            f"低于0.60的学生记录数为{low_count}，处于0.60-0.70区间的学生记录数为{near_count}。"
+            f"低于{REPORT_PASS_THRESHOLD:.2f}的学生记录数为{low_count}，处于{near_interval}区间的学生记录数为{near_count}。"
             f"这表明部分学生对相关知识点的理解深度、工程问题分析能力或综合应用能力仍有提升空间，"
             f"后续教学中应结合未达成学生清单开展更有针对性的过程反馈与学习支持。"
         )
@@ -245,9 +248,9 @@ def _add_conclusion(doc: Document, course_summary_df: pd.DataFrame) -> None:
     unreached = course_summary_df[course_summary_df["是否达成"] != "达成"]["课程目标编号"].tolist()
     parts = []
     if reached:
-        parts.append(f"{'、'.join(reached)}达到0.60的评价标准")
+        parts.append(f"{'、'.join(reached)}达到{REPORT_PASS_THRESHOLD:.2f}的评价标准")
     if unreached:
-        parts.append(f"{'、'.join(unreached)}暂未达到0.60的评价标准")
+        parts.append(f"{'、'.join(unreached)}暂未达到{REPORT_PASS_THRESHOLD:.2f}的评价标准")
     doc.add_paragraph(
         f"综合评价结果显示，{'; '.join(parts)}。"
         "后续课程教学将继续围绕课程目标达成情况，持续改进教学组织、过程评价和学习支持方式。"

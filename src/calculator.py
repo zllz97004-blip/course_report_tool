@@ -2,10 +2,10 @@ import pandas as pd
 import numpy as np
 import re
 
-from .config import debug_print
+from .config import ATTAINMENT_THRESHOLD, debug_print
 
 
-PASS_THRESHOLD = 0.70
+PASS_THRESHOLD = ATTAINMENT_THRESHOLD
 
 
 def _normalize_key(v):
@@ -390,8 +390,8 @@ def _count_intervals(series: pd.Series) -> dict:
     s = pd.to_numeric(series, errors="coerce").dropna()
 
     return {
-        "0.0-0.6人数": int(((s >= 0.0) & (s < 0.6)).sum()),
-        "0.6-0.7人数": int(((s >= 0.6) & (s < 0.7)).sum()),
+        "0.0-0.6人数": int(((s >= 0.0) & (s < PASS_THRESHOLD)).sum()),
+        "0.6-0.7人数": int(((s >= PASS_THRESHOLD) & (s < 0.7)).sum()),
         "0.7-0.8人数": int(((s >= 0.7) & (s < 0.8)).sum()),
         "0.8-0.9人数": int(((s >= 0.8) & (s < 0.9)).sum()),
         "0.9-1.0人数": int(((s >= 0.9) & (s <= 1.0)).sum()),

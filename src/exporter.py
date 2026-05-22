@@ -13,6 +13,8 @@ from docx.shared import Cm, Pt
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
+from .config import ATTAINMENT_THRESHOLD
+
 try:
     import matplotlib
     matplotlib.use("Agg")
@@ -28,7 +30,7 @@ def export_result_workbook(output_path: Path, student_target_df: pd.DataFrame, c
         course_target_df.to_excel(writer, sheet_name="课程目标结果表", index=False)
 
 
-ANALYSIS_PASS_THRESHOLD = 0.60
+ANALYSIS_PASS_THRESHOLD = ATTAINMENT_THRESHOLD
 
 
 def _build_course_summary_sheet(course_target_df: pd.DataFrame) -> pd.DataFrame:
@@ -89,10 +91,10 @@ def _build_unmet_students_sheet(student_target_df: pd.DataFrame) -> pd.DataFrame
 def _attainment_interval(v) -> str:
     if pd.isna(v):
         return ""
-    if v < 0.60:
-        return "<0.60"
+    if v < ANALYSIS_PASS_THRESHOLD:
+        return f"<{ANALYSIS_PASS_THRESHOLD:.2f}"
     if v < 0.70:
-        return "0.60-0.70"
+        return f"{ANALYSIS_PASS_THRESHOLD:.2f}-0.70"
     if v < 0.80:
         return "0.70-0.80"
     if v < 0.90:
@@ -103,7 +105,7 @@ def _attainment_interval(v) -> str:
 def _build_distribution_sheet(student_target_df: pd.DataFrame) -> pd.DataFrame:
     df = student_target_df[["课程目标编号", "综合达成值"]].copy()
     df["达成度区间"] = df["综合达成值"].apply(_attainment_interval)
-    intervals = ["<0.60", "0.60-0.70", "0.70-0.80", "0.80-0.90", ">=0.90"]
+    intervals = [f"<{ANALYSIS_PASS_THRESHOLD:.2f}", f"{ANALYSIS_PASS_THRESHOLD:.2f}-0.70", "0.70-0.80", "0.80-0.90", ">=0.90"]
     rows = []
 
     for target_id, grp in df.groupby("课程目标编号", sort=True):
@@ -125,7 +127,7 @@ def _build_distribution_sheet(student_target_df: pd.DataFrame) -> pd.DataFrame:
 
 def _build_chart_data_sheet(course_target_df: pd.DataFrame, distribution_df: pd.DataFrame) -> pd.DataFrame:
     avg_df = course_target_df[["课程目标编号", "综合平均达成值"]].copy()
-    unmet_df = distribution_df[distribution_df["达成度区间"] == "<0.60"][
+    unmet_df = distribution_df[distribution_df["达成度区间"] == f"<{ANALYSIS_PASS_THRESHOLD:.2f}"][
         ["课程目标编号", "人数"]
     ].rename(columns={"人数": "未达成人数"})
     interval_counts = distribution_df.pivot_table(
@@ -368,7 +370,7 @@ def _plot_three_year_compare(table2, save_path: Path) -> None:
     fig, ax = plt.subplots(figsize=(8.0, 4.6))
     ax.bar([i - width / 2 for i in x], s["课程目标1"], width=width, label="课程目标1")
     ax.bar([i + width / 2 for i in x], s["课程目标2"], width=width, label="课程目标2")
-    ax.axhline(0.70, linestyle="--", linewidth=1, label="达标阈值")
+    ax.axhline(ATTAINMENT_THRESHOLD, linestyle="--", linewidth=1, label="达标阈值")
     ax.set_xticks(x)
     ax.set_xticklabels(s["grades"])
     ax.set_ylabel("达成值")
@@ -388,7 +390,7 @@ def _plot_target_scatter(student_target_df: pd.DataFrame, target_id: str, save_p
 
     fig, ax = plt.subplots(figsize=(8.0, 4.6))
     ax.scatter(x, y)
-    ax.axhline(0.70, linestyle="--", linewidth=1, label="达标阈值")
+    ax.axhline(ATTAINMENT_THRESHOLD, linestyle="--", linewidth=1, label="达标阈值")
     ax.set_xlabel("学生序号")
     ax.set_ylabel("综合达成值")
     ax.legend()

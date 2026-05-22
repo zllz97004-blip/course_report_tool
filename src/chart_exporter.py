@@ -7,8 +7,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from .config import ATTAINMENT_THRESHOLD
 
-PASS_THRESHOLD = 0.60
+PASS_THRESHOLD = ATTAINMENT_THRESHOLD
 
 
 def _prepare_matplotlib() -> None:
@@ -92,7 +93,7 @@ def _save_three_year_compare(history_df: pd.DataFrame, output_path: Path) -> Non
             linewidth=2,
             label=target_id,
         )
-    ax.axhline(PASS_THRESHOLD, linestyle="--", linewidth=1.2, color="#B00020", label="合格阈值 0.60")
+    ax.axhline(PASS_THRESHOLD, linestyle="--", linewidth=1.2, color="#B00020", label=f"合格阈值 {PASS_THRESHOLD:.2f}")
     ax.set_title("3年课程目标达成度对比图")
     ax.set_xlabel("学年")
     ax.set_ylabel("综合平均达成值")
@@ -111,7 +112,7 @@ def _save_target_scatter(student_df: pd.DataFrame, target_id: str, output_path: 
 
     fig, ax = plt.subplots(figsize=(8.5, 5.0))
     ax.scatter(df["学生序号"], df["综合达成度"], s=28, alpha=0.85)
-    ax.axhline(PASS_THRESHOLD, linestyle="--", linewidth=1.2, color="#B00020", label="合格阈值 0.60")
+    ax.axhline(PASS_THRESHOLD, linestyle="--", linewidth=1.2, color="#B00020", label=f"合格阈值 {PASS_THRESHOLD:.2f}")
     ax.set_title(f"{target_id}达成度值散点图")
     ax.set_xlabel("学生序号")
     ax.set_ylabel("综合达成度")

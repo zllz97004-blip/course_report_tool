@@ -1,5 +1,7 @@
 import pandas as pd
 
+from .config import ATTAINMENT_THRESHOLD
+
 
 def _target_label(v) -> str:
     s = str(v).strip()
@@ -11,7 +13,7 @@ def _judge_result(avg: float) -> str:
         return "数据不足"
     if avg >= 0.8:
         return "达成情况良好"
-    if avg >= 0.7:
+    if avg >= ATTAINMENT_THRESHOLD:
         return "基本达标"
     return "达成情况偏弱"
 
@@ -19,7 +21,7 @@ def _judge_result(avg: float) -> str:
 def _judge_problem(low_ratio: float, high_ratio: float, avg: float) -> str:
     if pd.isna(avg):
         return "缺少完整数据"
-    if avg < 0.7:
+    if avg < ATTAINMENT_THRESHOLD:
         return "目标达成不足，需重点改进"
     if low_ratio > 0.3:
         return "虽达到标准，但学生掌握不均衡"
@@ -40,7 +42,7 @@ def _build_analysis_summary(row) -> str:
 def _build_suggestion(row) -> str:
     if pd.isna(row["综合平均达成值"]):
         return "建议补充完整数据后再分析。"
-    if row["综合平均达成值"] < 0.7:
+    if row["综合平均达成值"] < ATTAINMENT_THRESHOLD:
         return "后续教学中应强化重点难点内容讲解，并加强针对性训练与过程指导。"
     if row["低分段占比"] > 0.3:
         return "后续教学中应加强分层指导和过程反馈，缩小学生之间的达成差异。"
