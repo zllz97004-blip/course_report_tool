@@ -168,9 +168,9 @@ def _add_charts(doc: Document, chart_paths: dict = None) -> None:
 
     chart_items = [
         ("图1 3年课程目标达成度对比图", chart_paths.get("three_year_compare")),
-        ("图2 课程目标1达成度值散点图", chart_paths.get("target1_scatter")),
-        ("图3 课程目标2达成度值散点图", chart_paths.get("target2_scatter")),
     ]
+    for idx, (target_id, path) in enumerate(chart_paths.get("scatter", []), start=2):
+        chart_items.append((f"图{idx} {target_id}达成度值散点图", path))
 
     _add_heading(doc, "五、持续改进报告图表")
     for caption, path in chart_items:

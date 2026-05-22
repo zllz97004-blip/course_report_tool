@@ -55,6 +55,25 @@ def _read_history_df(course_path: Path, course_target_df: pd.DataFrame) -> pd.Da
         if target_id in current_values:
             df.at[idx, "综合平均达成值"] = current_values[target_id]
 
+    existing_targets = set(df["课程目标编号"].dropna().astype(str))
+    current_year = (
+        str(df["学年"].dropna().iloc[-1])
+        if not df["学年"].dropna().empty
+        else str(course_target_df["开课学期"].dropna().iloc[0])
+    )
+    missing_rows = []
+    for target_id, value in current_values.items():
+        if target_id not in existing_targets:
+            missing_rows.append(
+                {
+                    "学年": current_year,
+                    "课程目标编号": target_id,
+                    "综合平均达成值": value,
+                }
+            )
+    if missing_rows:
+        df = pd.concat([df, pd.DataFrame(missing_rows)], ignore_index=True)
+
     return df.dropna(subset=["综合平均达成值"]).copy()
 
 
@@ -116,15 +135,22 @@ def export_charts(
 
     paths = {
         "three_year_compare": figures_dir / "01_三年课程目标达成度对比.png",
-        "target1_scatter": figures_dir / "02_课程目标1达成度散点图.png",
-        "target2_scatter": figures_dir / "03_课程目标2达成度散点图.png",
+        "scatter": [],
     }
 
     history_df = _read_history_df(course_path, course_target_df)
     student_df = _read_student_attainment_df(analysis_workbook_path)
 
     _save_three_year_compare(history_df, paths["three_year_compare"])
-    _save_target_scatter(student_df, "课程目标1", paths["target1_scatter"])
-    _save_target_scatter(student_df, "课程目标2", paths["target2_scatter"])
+    target_ids = sorted(student_df["课程目标编号"].dropna().astype(str).unique())
+    for idx, target_id in enumerate(target_ids, start=2):
+        output_path = figures_dir / f"{idx:02d}_{target_id}达成度散点图.png"
+        _save_target_scatter(student_df, target_id, output_path)
+        paths["scatter"].append((target_id, output_path))
+
+    if paths["scatter"]:
+        paths["target1_scatter"] = paths["scatter"][0][1]
+    if len(paths["scatter"]) > 1:
+        paths["target2_scatter"] = paths["scatter"][1][1]
 
     return paths

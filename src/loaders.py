@@ -103,6 +103,25 @@ def load_excel(path: Path) -> pd.DataFrame:
     return normalize_columns(pd.read_excel(path))
 
 
+def _find_single_file(course_path: Path, exact_name: str, pattern: str) -> Path:
+    exact = course_path / exact_name
+    if exact.exists():
+        return exact
+    candidates = sorted(course_path.glob(pattern))
+    if not candidates:
+        raise FileNotFoundError(f"未找到 {exact_name}，也未找到匹配 {pattern} 的文件。")
+    return candidates[0]
+
+
+def has_exam_inputs(course_path: Path) -> bool:
+    mapping_file = course_path / "03_试卷分值对应表.xlsx"
+    long_score_files = [
+        course_path / "04_试卷题目得分长表.xlsx",
+        course_path / "04_试卷题目得分表_长表.xlsx",
+    ]
+    return mapping_file.exists() and any(p.exists() for p in long_score_files)
+
+
 def load_course_excel(path: Path) -> pd.DataFrame:
     df = load_excel(path)
     debug_print(">>> 使用的是新版 load_course_excel")
@@ -110,16 +129,18 @@ def load_course_excel(path: Path) -> pd.DataFrame:
     if not required_cols.issubset(set(df.columns)):
         raise ValueError(f"课程主数据表缺少必要字段，当前列名: {list(df.columns)}")
 
-    if "课堂表现权重" not in df.columns:
-        df["课堂表现权重"] = 0.04
-    if "课程作业权重" not in df.columns:
-        df["课程作业权重"] = 0.20
-    if "实验报告权重" not in df.columns:
-        df["实验报告权重"] = 0.08
-    if "实验操作权重" not in df.columns:
-        df["实验操作权重"] = 0.08
-    if "期末权重" not in df.columns:
-        df["期末权重"] = 0.60
+    exam_weight_cols = {"课堂表现权重", "课程作业权重", "实验报告权重", "实验操作权重", "期末权重"}
+    if exam_weight_cols.intersection(set(df.columns)):
+        if "课堂表现权重" not in df.columns:
+            df["课堂表现权重"] = 0.04
+        if "课程作业权重" not in df.columns:
+            df["课程作业权重"] = 0.20
+        if "实验报告权重" not in df.columns:
+            df["实验报告权重"] = 0.08
+        if "实验操作权重" not in df.columns:
+            df["实验操作权重"] = 0.08
+        if "期末权重" not in df.columns:
+            df["期末权重"] = 0.60
 
     return df
 
@@ -136,6 +157,11 @@ def load_scores_excel(path: Path) -> pd.DataFrame:
 
     long_required = {"学号", "姓名", "课程目标编号", "平时作业", "实验", "实验报告", "课堂表现"}
     if long_required.issubset(set(df1.columns)):
+        return df1
+
+    non_exam_base = {"学号", "姓名", "课程目标编号"}
+    non_exam_score_cols = [col for col in df1.columns if str(col).endswith("成绩")]
+    if non_exam_base.issubset(set(df1.columns)) and non_exam_score_cols:
         return df1
 
     # 若不是新版长表，再尝试按旧版双层表头读取
@@ -183,28 +209,34 @@ def load_scores_excel(path: Path) -> pd.DataFrame:
 
 def load_all_inputs(course_path: Path) -> dict:
     course_file = course_path / "01_课程主数据表.xlsx"
-    scores_file = course_path / "02_学生成绩表.xlsx"
+    scores_file = _find_single_file(course_path, "02_学生成绩表.xlsx", "02_*.xlsx")
     mapping_file = course_path / "03_试卷分值对应表.xlsx"
+    is_exam_course = has_exam_inputs(course_path)
 
     candidates = [
-        course_path / "04_试卷题目得分表_长表.xlsx",
         course_path / "04_试卷题目得分长表.xlsx",
+        course_path / "04_试卷题目得分表_长表.xlsx",
     ]
     long_scores_file = next((p for p in candidates if p.exists()), None)
-    if long_scores_file is None:
+    if is_exam_course and long_scores_file is None:
         raise FileNotFoundError("未找到 04 长表文件，请检查文件名。")
 
     course = load_course_excel(course_file)
     scores = load_scores_excel(scores_file)
-    mapping = load_excel(mapping_file)
-    long_scores = load_excel(long_scores_file)
+    mapping = load_excel(mapping_file) if is_exam_course else None
+    long_scores = load_excel(long_scores_file) if is_exam_course else None
 
     debug_items = [
         ("课程主数据表", course_file, course),
         ("学生成绩表", scores_file, scores),
-        ("试卷分值对应表", mapping_file, mapping),
-        ("题目得分长表", long_scores_file, long_scores),
     ]
+    if is_exam_course:
+        debug_items.extend(
+            [
+                ("试卷分值对应表", mapping_file, mapping),
+                ("题目得分长表", long_scores_file, long_scores),
+            ]
+        )
     for label, path, df in debug_items:
         debug_print(f"\n===== {label} 读取后信息 =====")
         debug_print("file =", path)
@@ -214,15 +246,18 @@ def load_all_inputs(course_path: Path) -> dict:
     if "课程目标编号" in scores.columns:
         debug_print("\n===== 学生成绩表中课程目标编号的唯一值（读取后）=====")
         debug_print(scores["课程目标编号"].dropna().astype(str).drop_duplicates().tolist())
-    if "课程目标编号" in mapping.columns:
+    if mapping is not None and "课程目标编号" in mapping.columns:
         debug_print("\n===== 试卷分值对应表中课程目标编号的唯一值（读取后）=====")
         debug_print(mapping["课程目标编号"].dropna().astype(str).drop_duplicates().tolist())
-    long_target_col = "课程目标编号" if "课程目标编号" in long_scores.columns else "课程目标"
-    if long_target_col in long_scores.columns:
+    long_target_col = None
+    if long_scores is not None:
+        long_target_col = "课程目标编号" if "课程目标编号" in long_scores.columns else "课程目标"
+    if long_scores is not None and long_target_col in long_scores.columns:
         debug_print("\n===== 题目得分长表中课程目标编号的唯一值（读取后）=====")
         debug_print(long_scores[long_target_col].dropna().astype(str).drop_duplicates().tolist())
 
     return {
+        "course_type": "exam" if is_exam_course else "non_exam",
         "course": course,
         "scores": scores,
         "mapping": mapping,
