@@ -9,6 +9,12 @@ from .loaders import has_exam_inputs, normalize_columns
 
 SOURCE_REAL = "真实分项成绩"
 SOURCE_WEIGHT_SPLIT = "按课程目标权重拆分"
+SOURCE_RANDOM = "随机扰动测试"
+
+WEIGHT_SPLIT_RISK_NOTICE = (
+    "该 02 表由原始总评成绩按课程目标权重拆分生成，适合历史数据补录、流程测试和无分项成绩条件下的达成度估算；"
+    "若用于正式归档，建议结合课程原始评分记录进行人工复核。"
+)
 
 EXAM_ITEM_FULL_MARKS = {
     "课程作业": 25,
@@ -80,6 +86,9 @@ def _find_raw_score_file(search_dirs: list, course_name: str) -> Path:
             and not p.name.startswith("02_")
             and not p.name.startswith("03_")
             and not p.name.startswith("04_")
+            and not p.name.startswith("05_")
+            and not p.name.startswith("06_")
+            and not p.name.startswith("07_")
             and "题目得分" not in p.name
             and "核查报告" not in p.name
         )
@@ -324,35 +333,117 @@ def _expected_score_full_marks(standard_df: pd.DataFrame, course_df: pd.DataFram
     return full_marks
 
 
+def _split_mode_summary(source_values: list) -> str:
+    modes = []
+    source_text = "；".join(source_values)
+    if SOURCE_REAL in source_text:
+        modes.append("真实分项")
+    if SOURCE_WEIGHT_SPLIT in source_text:
+        modes.append("按权重拆分")
+    if SOURCE_RANDOM in source_text:
+        modes.append("随机扰动测试")
+    return "；".join(modes) if modes else source_text
+
+
+def _target_count_summary(target_counts: pd.DataFrame) -> str:
+    if target_counts.empty:
+        return "无课程目标记录"
+    return "；".join(
+        f"{row['课程目标编号']}：{int(row['学生记录数'])}条"
+        for _, row in target_counts.iterrows()
+    )
+
+
+def _total_review_metrics(total_review: pd.DataFrame):
+    if "误差" not in total_review.columns:
+        note = str(total_review.iloc[0].get("说明", "无法复核")) if not total_review.empty else "无法复核"
+        return None, None, note
+    abs_error = total_review["误差"].abs()
+    return float(abs_error.max()), float(abs_error.mean()), ""
+
+
+def _risk_notice(split_mode: str, passed: bool, total_review_note: str) -> str:
+    notices = []
+    if "按权重拆分" in split_mode:
+        notices.append(WEIGHT_SPLIT_RISK_NOTICE)
+    if "随机扰动测试" in split_mode:
+        notices.append("该 02 表包含随机扰动测试数据，仅适合功能验证，不应用于正式教学质量归档。")
+    if total_review_note:
+        notices.append(total_review_note)
+    if not passed:
+        notices.append("核查存在未通过项，请先修正原始成绩或标准 02 后再用于正式计算。")
+    if not notices:
+        notices.append("未发现明显数据准备风险。")
+    return " ".join(notices)
+
+
 def _build_review_report(
     standard_df: pd.DataFrame,
     course_df: pd.DataFrame,
     raw_df: pd.DataFrame,
     is_exam_course: bool,
+    raw_file: Path,
 ) -> dict:
     student_ids = standard_df["学号"].astype(str)
-    target_counts = standard_df.groupby("课程目标编号")["学号"].nunique().reset_index(name="人数")
+    target_counts = (
+        standard_df.groupby("课程目标编号")
+        .agg(学生记录数=("学号", "size"), 学生人数=("学号", "nunique"))
+        .reset_index()
+    )
     source_values = standard_df["数据来源说明"].dropna().astype(str).drop_duplicates().tolist()
+    split_mode = _split_mode_summary(source_values)
     full_marks = _expected_score_full_marks(standard_df, course_df, is_exam_course)
+    score_df = standard_df.filter(regex="成绩$|课程作业|实验操作|实验报告|课堂表现")
+    has_missing_id = (student_ids == "").any()
+    has_duplicate_student_target = standard_df.duplicated(subset=["学号", "课程目标编号"]).any()
+    has_missing_score = score_df.isna().any().any()
     over_limit_rows = []
     for col, full_mark in full_marks.items():
         values = pd.to_numeric(standard_df[col], errors="coerce")
-        over_count = int((values > full_mark).sum())
+        over_count = int(((values < 0) | (values > full_mark)).sum())
         if over_count:
-            over_limit_rows.append({"字段": col, "满分": full_mark, "超出满分记录数": over_count})
+            over_limit_rows.append({"字段": col, "合理下限": 0, "合理上限": full_mark, "超出合理范围记录数": over_count})
 
     total_review = _build_total_review(standard_df, course_df)
+    max_error, mean_error, total_review_note = _total_review_metrics(total_review)
+    target_count_ok = target_counts["学生记录数"].nunique() == 1
+    total_review_ok = max_error is None or max_error <= 1e-6
+    passed = not (
+        has_missing_id
+        or has_duplicate_student_target
+        or has_missing_score
+        or over_limit_rows
+        or not target_count_ok
+        or not total_review_ok
+    )
+    risk_notice = _risk_notice(split_mode, passed, total_review_note)
+    course_type_label = "试卷型" if is_exam_course else "非试卷型"
+    course_name = str(course_df["课程名称"].iloc[0]) if "课程名称" in course_df.columns and not course_df.empty else ""
+    target_count = int(course_df["课程目标编号"].nunique()) if "课程目标编号" in course_df.columns else 0
     summary = pd.DataFrame(
         [
+            {"核查项": "原始成绩表文件名", "结果": raw_file.name},
+            {"核查项": "课程名称", "结果": course_name},
+            {"核查项": "课程类型", "结果": course_type_label},
+            {"核查项": "成绩拆分模式", "结果": split_mode},
             {"核查项": "学生人数", "结果": int(student_ids.nunique())},
-            {"核查项": "是否存在缺失学号", "结果": "是" if (student_ids == "").any() else "否"},
-            {"核查项": "是否存在重复学号", "结果": "是" if student_ids.duplicated().any() else "否"},
+            {"核查项": "课程目标数量", "结果": target_count},
+            {"核查项": "每个课程目标对应的学生记录数", "结果": _target_count_summary(target_counts)},
+            {"核查项": "是否存在缺失学号", "结果": "是" if has_missing_id else "否"},
+            {
+                "核查项": "是否存在重复学号",
+                "结果": "是" if has_duplicate_student_target else "否（长表中同一学生对应多个课程目标属于正常）",
+            },
             {"核查项": "学号是否按字符串读取", "结果": "是"},
             {"核查项": "课程目标编号是否统一", "结果": "是" if standard_df["课程目标编号"].astype(str).str.startswith("课程目标").all() else "否"},
-            {"核查项": "每个课程目标人数是否一致", "结果": "是" if target_counts["人数"].nunique() == 1 else "否"},
-            {"核查项": "是否存在空成绩", "结果": "是" if standard_df.filter(regex="成绩$|课程作业|实验操作|实验报告|课堂表现").isna().any().any() else "否"},
-            {"核查项": "是否存在超出满分的成绩", "结果": "是" if over_limit_rows else "否"},
+            {"核查项": "每个课程目标人数是否一致", "结果": "是" if target_count_ok else "否"},
+            {"核查项": "是否存在缺失成绩", "结果": "是" if has_missing_score else "否"},
+            {"核查项": "是否存在超出合理范围的成绩", "结果": "是" if over_limit_rows else "否"},
+            {"核查项": "原始总评成绩与转换后复核总评成绩的最大误差", "结果": "" if max_error is None else f"{max_error:.6f}"},
+            {"核查项": "原始总评成绩与转换后复核总评成绩的平均误差", "结果": "" if mean_error is None else f"{mean_error:.6f}"},
             {"核查项": "原始总评成绩与转换后复核总评成绩的误差", "结果": _total_review_summary(total_review)},
+            {"核查项": "是否通过核查", "结果": "是" if passed else "否"},
+            {"核查项": "风险提示", "结果": risk_notice},
             {"核查项": "数据来源说明", "结果": "；".join(source_values)},
         ]
     )
@@ -434,7 +525,7 @@ def generate_standard_score_table(project_root: Path, course_path: Path) -> dict
     standard_df.to_excel(output_path, index=False)
 
     raw_flat = _read_flat_sheet(raw_file)
-    report_sheets = _build_review_report(standard_df, course_df, raw_flat, is_exam_course)
+    report_sheets = _build_review_report(standard_df, course_df, raw_flat, is_exam_course, raw_file)
     with pd.ExcelWriter(report_path, engine="openpyxl") as writer:
         for sheet_name, df in report_sheets.items():
             df.to_excel(writer, sheet_name=sheet_name, index=False)
