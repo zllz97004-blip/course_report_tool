@@ -92,7 +92,14 @@ def _prepare_score_df(score_df: pd.DataFrame, score_cols: list) -> pd.DataFrame:
 
 
 def _score_col_from_weight_col(weight_col: str) -> str:
-    return str(weight_col).replace("权重", "成绩")
+    aliases = {
+        "课堂表现权重": "课堂表现",
+        "课程作业权重": "平时作业",
+        "实验操作权重": "实验",
+        "实验报告权重": "实验报告",
+        "期末权重": "期末成绩",
+    }
+    return aliases.get(str(weight_col), str(weight_col).replace("权重", "成绩"))
 
 
 def _full_mark(target_id: str, item_name: str) -> float:

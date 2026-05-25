@@ -12,6 +12,7 @@ from .loaders import load_all_inputs
 from .non_exam_calculator import build_non_exam_student_target_result
 from .preprocess_raw_inputs import preprocess_raw_inputs
 from .report_exporter import export_report_docx
+from .score_preprocessor import generate_standard_score_table
 from .validators import validate_inputs
 
 
@@ -40,6 +41,11 @@ def _parse_args(argv=None):
     parser.add_argument(
         "--course",
         help="input_courses 下的课程文件夹名称；不传则使用当前默认课程选择规则。",
+    )
+    parser.add_argument(
+        "--prepare-scores",
+        action="store_true",
+        help="先从 raw_inputs 原始成绩表生成标准 02_学生成绩表.xlsx 和核查报告，再继续运行。",
     )
     return parser.parse_args(argv)
 
@@ -80,6 +86,9 @@ def main(argv=None):
 
     output_dir = project_root / "output" / course_path.name
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.prepare_scores:
+        generate_standard_score_table(project_root, course_path)
 
     if PREPROCESS_RAW_INPUTS:
         preprocess_raw_inputs(project_root, course_path)
