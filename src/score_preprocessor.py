@@ -1,4 +1,5 @@
 from pathlib import Path
+import random
 import re
 
 import pandas as pd
@@ -10,6 +11,10 @@ from .loaders import has_exam_inputs, normalize_columns
 SOURCE_REAL = "真实分项成绩"
 SOURCE_WEIGHT_SPLIT = "按课程目标权重拆分"
 SOURCE_RANDOM = "随机扰动测试"
+
+SPLIT_MODE_REAL = "真实分项"
+SPLIT_MODE_WEIGHT = "按权重拆分"
+SPLIT_MODE_RANDOM = "随机扰动测试"
 
 WEIGHT_SPLIT_RISK_NOTICE = (
     "该 02 表由原始总评成绩按课程目标权重拆分生成，适合历史数据补录、流程测试和无分项成绩条件下的达成度估算；"
@@ -298,7 +303,19 @@ def _build_from_final_only(raw_df: pd.DataFrame, course_df: pd.DataFrame) -> pd.
     return pd.DataFrame(rows)
 
 
-def _detect_and_build(raw_file: Path, course_df: pd.DataFrame, is_exam_course: bool) -> pd.DataFrame:
+def _normalize_split_mode(split_mode: str = None) -> str:
+    if not split_mode:
+        return ""
+    mode = str(split_mode).strip()
+    aliases = {
+        SOURCE_REAL: SPLIT_MODE_REAL,
+        SOURCE_WEIGHT_SPLIT: SPLIT_MODE_WEIGHT,
+        SOURCE_RANDOM: SPLIT_MODE_RANDOM,
+    }
+    return aliases.get(mode, mode)
+
+
+def _build_real_from_raw(raw_file: Path, course_df: pd.DataFrame) -> pd.DataFrame:
     if raw_file.name.startswith("副本材料成型") and "达成情况评价" in pd.ExcelFile(raw_file).sheet_names:
         return _read_material_achievement_sheet(raw_file, course_df)
 
@@ -306,6 +323,12 @@ def _detect_and_build(raw_file: Path, course_df: pd.DataFrame, is_exam_course: b
     if not raw_df.empty:
         if "课程目标编号" in raw_df.columns:
             return _build_from_existing_target_scores(raw_df, course_df)
+    return pd.DataFrame()
+
+
+def _build_weight_split_from_raw(raw_file: Path, course_df: pd.DataFrame, is_exam_course: bool) -> pd.DataFrame:
+    raw_df = _read_flat_sheet(raw_file)
+    if not raw_df.empty:
         if is_exam_course:
             process_df = _build_from_exam_process_total(raw_df, course_df)
             if not process_df.empty:
@@ -317,6 +340,62 @@ def _detect_and_build(raw_file: Path, course_df: pd.DataFrame, is_exam_course: b
     final_only_df = _read_final_only_from_wide_sheet(raw_file)
     if not final_only_df.empty:
         return _build_from_final_only(final_only_df, course_df)
+    return pd.DataFrame()
+
+
+def _apply_random_test_perturbation(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    rng = random.Random(20240525)
+    score_cols = []
+    for col in df.columns:
+        text = str(col)
+        if text == "总评成绩":
+            continue
+        if text.endswith("成绩") or text in {"课程作业", "实验操作", "实验报告", "课堂表现", "平时作业", "实验"}:
+            if pd.to_numeric(df[col], errors="coerce").notna().any():
+                score_cols.append(col)
+    for col in score_cols:
+        values = pd.to_numeric(df[col], errors="coerce")
+        jittered = values.apply(
+            lambda value: max(0, min(100, float(value) + rng.uniform(-3, 3))) if pd.notna(value) else value
+        )
+        df[col] = jittered
+    df["数据来源说明"] = SOURCE_RANDOM
+    return df
+
+
+def _detect_and_build(
+    raw_file: Path,
+    course_df: pd.DataFrame,
+    is_exam_course: bool,
+    split_mode: str = None,
+) -> pd.DataFrame:
+    mode = _normalize_split_mode(split_mode)
+    if mode == SPLIT_MODE_REAL:
+        real_df = _build_real_from_raw(raw_file, course_df)
+        if not real_df.empty:
+            return real_df
+        raise ValueError("选择了“真实分项”，但原始成绩表中未识别到已按课程目标拆分的真实分项成绩。")
+
+    if mode == SPLIT_MODE_WEIGHT:
+        split_df = _build_weight_split_from_raw(raw_file, course_df, is_exam_course)
+        if not split_df.empty:
+            return split_df
+        raise ValueError("选择了“按权重拆分”，但原始成绩表中未识别到可拆分的总评成绩或过程性总分。")
+
+    if mode == SPLIT_MODE_RANDOM:
+        split_df = _build_weight_split_from_raw(raw_file, course_df, is_exam_course)
+        if not split_df.empty:
+            return _apply_random_test_perturbation(split_df)
+        raise ValueError("选择了“随机扰动测试”，但原始成绩表中未识别到可用于测试拆分的成绩。")
+
+    real_df = _build_real_from_raw(raw_file, course_df)
+    if not real_df.empty:
+        return real_df
+
+    split_df = _build_weight_split_from_raw(raw_file, course_df, is_exam_course)
+    if not split_df.empty:
+        return split_df
 
     raise ValueError(f"无法识别原始成绩表结构: {raw_file}")
 
@@ -509,14 +588,19 @@ def _total_review_summary(total_review: pd.DataFrame) -> str:
     return f"最大绝对误差 {abs_error.max():.6f}，平均绝对误差 {abs_error.mean():.6f}"
 
 
-def generate_standard_score_table(project_root: Path, course_path: Path) -> dict:
+def generate_standard_score_table(
+    project_root: Path,
+    course_path: Path,
+    raw_file: Path = None,
+    split_mode: str = None,
+) -> dict:
     raw_inputs_dir = project_root / "raw_inputs"
     course_df = _read_course_df(course_path)
     course_name = str(course_df["课程名称"].iloc[0])
-    raw_file = _find_raw_score_file([course_path, raw_inputs_dir], course_name)
+    raw_file = Path(raw_file) if raw_file else _find_raw_score_file([course_path, raw_inputs_dir], course_name)
     is_exam_course = has_exam_inputs(course_path)
 
-    standard_df = _detect_and_build(raw_file, course_df, is_exam_course)
+    standard_df = _detect_and_build(raw_file, course_df, is_exam_course, split_mode=split_mode)
     if standard_df.empty:
         raise ValueError(f"原始成绩表未生成任何标准02记录: {raw_file}")
 
